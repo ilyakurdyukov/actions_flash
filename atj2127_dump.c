@@ -867,6 +867,8 @@ static void find_lfi(usbio_t *io, nandread_t *x, int brec_idx, const char *dump_
 		}
 	}
 	fclose(fo);
+
+	printf("The raw LFI dump should contain two copies of the firmware, both may be corrupted in different places, use this command to check and repair the LFI:\n  ./fwhelper <lfi_raw.bin> lfi_repair 0x%x 0x%x 0x%x <lfi_out.bin>\n", fw_size, npages, psize);
 }
 
 static uint64_t str_to_size(const char *str) {
