@@ -8,7 +8,7 @@ An example of how to run a payload:
 ```
 sudo ./atj2127_dump \
 	simple_switch 0xbfc18000 adfus.bin \
-	write_mem 0xbfc1e000 0 0 hello.bin exec_ret 0xbfc1e000 -1
+	simple_exec 0xbfc1e000 hello.bin -1
 ```
 
 How to dump ROM and RAM:

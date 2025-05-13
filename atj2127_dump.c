@@ -618,6 +618,37 @@ static void adfu_switch(usbio_t *io, uint32_t addr) {
 	usleep(10000); // 10ms timeout for proper init
 }
 
+static int adfu_exec(usbio_t *io, uint32_t addr, int32_t len) {
+	actions_cmd(io, CMD_ADFU_EXEC, 0, addr, 0, 0);
+	if (check_usbs(io, NULL)) return -1;
+
+	if (len == -1) {
+		actions_cmd(io, CMD_ADFU_RETSIZE, 4, 0, 1, 4);
+		if (usb_recv(io, 4) != 4) {
+			DBG_LOG("unexpected response\n");
+			return -1;
+		}
+		len = READ32_LE(io->buf);
+		if (check_usbs(io, NULL)) return -1;
+	}
+	if ((uint32_t)len > 0x40000) {
+		DBG_LOG("requested length too long (0x%x)\n", len);
+		return -1;
+	} else if (len) {
+		actions_cmd(io, CMD_ADFU_READRET, len, 0, 1, len);
+		if (usb_recv(io, len) != len) {
+			DBG_LOG("unexpected response\n");
+			return -1;
+		}
+		if (io->verbose < 2) {
+			DBG_LOG("result (%d):\n", len);
+			print_mem(stderr, io->buf, len);
+		}
+		if (check_usbs(io, NULL)) return -1;
+	}
+	return 0;
+}
+
 static unsigned adfu_checksum(const void *addr, unsigned n) {
 	const uint16_t *p = addr;
 	unsigned i, sum = 0;
@@ -990,7 +1021,7 @@ int main(int argc, char **argv) {
 				DBG_LOG("unexpected response\n");
 				break;
 			}
-			if (verbose < 2) {
+			if (io->verbose < 2) {
 				DBG_LOG("result (%d):\n", len);
 				print_mem(stderr, io->buf, len);
 			}
@@ -1031,7 +1062,7 @@ int main(int argc, char **argv) {
 			if (check_usbs(io, NULL)) break;
 			argc -= 1; argv += 1;
 
-		} else if (!strcmp(argv[1], "rom_info")) {
+		} else if (!strcmp(argv[1], "adfu_info")) {
 			usbc_cmd_t usbc; int len = 0x12;
 			scsi_tag = 0; // important
 			WRITE32_LE(&usbc.sig, USBC_SIG);
@@ -1042,13 +1073,29 @@ int main(int argc, char **argv) {
 			usbc.cdb_len = 16;
 			memset(usbc.cdb, 0, 16);
 			usbc.cdb[0] = 0xcc;
+			// ATJ2127 return 0x12 bytes
+			// ATJ2157 return the specified amount
+			usbc.cdb[7] = len;
 			usb_send(io, &usbc, USBC_LEN);
 
 			if (usb_recv(io, len) != len) {
 				DBG_LOG("unexpected response\n");
 				break;
 			}
-			if (verbose < 2) {
+			// "\0CADFUD" ...
+			// ATJ2127: "\x10\xd6"
+			// ATJ2157: "\x30\x51"
+			// ... "A\0\0\0\0\0\0\0\0"
+			if (!memcmp(io->buf, "\0CADFUD", 7)) {
+				int id = io->buf[7] << 8 | io->buf[8];
+				const char *s = NULL;
+				switch (id) {
+				case 0x10d6: s = "ATJ2127"; break;
+				case 0x3051: s = "ATJ2157"; break;
+				}
+				if (s) DBG_LOG("guess: chip = %s\n", s);
+			}
+			if (io->verbose < 2) {
 				DBG_LOG("result (%d):\n", len);
 				print_mem(stderr, io->buf, len);
 			}
@@ -1092,38 +1139,25 @@ int main(int argc, char **argv) {
 
 		} else if (!strcmp(argv[1], "exec_ret")) {
 			uint64_t addr; int len;
-			if (argc <= 2) ERR_EXIT("bad command\n");
+			if (argc <= 3) ERR_EXIT("bad command\n");
 
 			addr = str_to_size(argv[2]);
 			len = strtol(argv[3], NULL, 0);
 			if (addr >> 32) ERR_EXIT("32-bit limit reached\n");
-			actions_cmd(io, CMD_ADFU_EXEC, 0, addr, 0, 0);
-			if (check_usbs(io, NULL)) break;
-
-			if (len == -1) {
-				actions_cmd(io, CMD_ADFU_RETSIZE, 4, 0, 1, 4);
-				if (usb_recv(io, 4) != 4) {
-					DBG_LOG("unexpected response\n");
-					break;
-				}
-				len = READ32_LE(io->buf);
-				if (check_usbs(io, NULL)) break;
-			}
-			if (len > 0x40000)
-				ERR_EXIT("requested length too long (0x%x)\n", len);
-			else if (len) {
-				actions_cmd(io, CMD_ADFU_READRET, len, 0, 1, len);
-				if (usb_recv(io, len) != len) {
-					DBG_LOG("unexpected response\n");
-					break;
-				}
-				if (verbose < 2) {
-					DBG_LOG("result (%d):\n", len);
-					print_mem(stderr, io->buf, len);
-				}
-				if (check_usbs(io, NULL)) break;
-			}
+			if (adfu_exec(io, addr, len)) break;
 			argc -= 3; argv += 3;
+
+		} else if (!strcmp(argv[1], "simple_exec")) {
+			const char *fn; uint64_t addr; int len;
+			if (argc <= 4) ERR_EXIT("bad command\n");
+
+			addr = str_to_size(argv[2]);
+			fn = argv[3];
+			len = strtol(argv[4], NULL, 0);
+			if (addr >> 32) ERR_EXIT("32-bit limit reached\n");
+			write_mem(io, addr & ~1, 0, 0, fn, blk_size);
+			if (adfu_exec(io, addr, len)) break;
+			argc -= 4; argv += 4;
 
 		} else if (!strcmp(argv[1], "read_mem")) {
 			const char *fn; uint64_t addr, size;
