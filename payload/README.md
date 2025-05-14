@@ -6,14 +6,14 @@ Tested ONLY on ATJ2127.
 
 An example of how to run a payload:
 ```
-sudo ./atj2127_dump \
+sudo ./actions_dump \
 	simple_switch 0xbfc18000 adfus.bin \
 	simple_exec 0xbfc1e000 hello.bin -1
 ```
 
 How to dump ROM and RAM:
 ```
-sudo ./atj2127_dump \
+sudo ./actions_dump \
 	simple_switch 0xbfc18000 adfus.bin \
 	read_mem2 0x9fc00000 256K dump.bin
 ```

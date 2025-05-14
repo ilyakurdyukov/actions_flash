@@ -1,4 +1,4 @@
-## Actions ATJ2127 firmware dumper for Linux
+## Actions firmware dumper for Linux
 
 Firmware dumper for MP3 players on the ATJ2127 chip.
 
@@ -31,12 +31,12 @@ $ echo 10d6 10d6 | sudo tee /sys/bus/usb-serial/drivers/generic/new_id
 
 The device can be rebooted from flash disk mode to ADFU mode:
 ```
-$ sudo ./atj2127_dump --id 10d6:1101 adfu_reboot
+$ sudo ./actions_dump --id 10d6:1101 adfu_reboot
 ```
 
 To make a RAM dump from ADFU mode (first 96K bytes containing ROM are zero):
 ```
-sudo ./atj2127_dump read_mem 0xbfc00000 256K dump.bin
+sudo ./actions_dump read_mem 0xbfc00000 256K dump.bin
 ```
 
 * Where 256K is the expected RAM length in bytes.
@@ -74,7 +74,7 @@ The commands below require loading the `adfus` binary that comes with the tool (
 If you capture all the data sent by the firmware update program using `usbmon` and Wireshark, the update process will look like this:
 
 ```
-sudo ./atj2127_dump \
+sudo ./actions_dump \
 	simple_switch 0xbfc18000 adfus.bin \
 	write_mem 0xbfc1e000 0 0 nandhwsc.bin exec_ret 0xbfc1e000 0x9c \
 	write_mem 0x9fc24c00 0 0 nandinfo.bin \
@@ -96,7 +96,7 @@ If you create `/etc/udev/rules.d/80-actions.rules` with these lines:
 SUBSYSTEMS=="usb", ATTRS{idVendor}=="10d6", ATTRS{idProduct}=="10d6", MODE="0666", TAG+="uaccess"
 SUBSYSTEMS=="usb", ATTRS{idVendor}=="10d6", ATTRS{idProduct}=="1101", MODE="0666", TAG+="uaccess"
 ```
-...then you can run `atj2127_dump` without root privileges.
+...then you can run `actions_dump` without root privileges.
 
 ### Useful links
 

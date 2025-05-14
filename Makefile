@@ -2,7 +2,7 @@
 LIBUSB = 1
 CFLAGS = -O2 -Wall -Wextra -std=c99 -pedantic -Wno-unused
 CFLAGS += -DUSE_LIBUSB=$(LIBUSB)
-APPNAME = atj2127_dump
+APPNAME = actions_dump
 
 ifeq ($(LIBUSB), 1)
 LIBS = -lusb-1.0
