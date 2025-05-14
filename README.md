@@ -51,11 +51,13 @@ Flash disk mode commands:
 
 Basic commands supported by the chip's boot ROM:
 
+`adfu_info` - print some info from the chip ROM (seems to be the chip ID, the `adfus` binary doesn't support this command).  
 `write_mem <addr> <file_offset> <size> <input_file>` - zero size means until the end of the file.  
 `switch <addr>` - switch to `adfus` code.  
 `exec_ret <addr> <ret_size>` - execute the code and read the result (use `ret_size` = -1 if size can vary).  
 `read_mem <addr> <size> <output_file>` - read memory, can't read ROM.  
 `simple_switch <addr> <file>` - equivalent to `write_mem <addr> 0 0 <file> switch <addr>`.  
+`simple_exec <addr> <file> <ret_size>` - equivalent to `write_mem <addr & ~1> 0 0 <file> exec_ret <addr> <ret_size>`.  
 
 The commands below require loading the `adfus` binary that comes with the tool (using the command `simple_switch 0xbfc18000 adfus.bin`).
 

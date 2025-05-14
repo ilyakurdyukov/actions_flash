@@ -1,8 +1,8 @@
 OBJDIR = obj
+NAME = adfus
 SRCS = start $(NAME)
 OBJS = $(SRCS:%=$(OBJDIR)/%.o)
 LDSCRIPT = simple.ld
-NAME = adfus
 MIPS = 16
 
 ifdef TOOLCHAIN
@@ -30,7 +30,6 @@ LFLAGS = -nostartfiles -nodefaultlibs -nostdlib -Wl,-T,$(LDSCRIPT) -Wl,-z,notext
 AFLAGS = -mno-abicalls -fno-PIE
 
 ifeq ($(NAME), adfus)
-CFLAGS += -ffunction-sections
 LFLAGS += -Wl,--defsym,IMAGE_START=0xbfc18000
 SRCS = adfus_asm adfus
 else
@@ -40,7 +39,6 @@ endif
 # Clang's LTO doesn't work with the GCC toolchain
 ifeq ($(findstring -gcc-toolchain,$(notdir $(CC))),)
 CFLAGS += -flto
-LFLAGS += -march=mips32r2
 endif
 
 ifdef SYSROOT
@@ -80,5 +78,5 @@ $(OBJDIR)/$(NAME).asm: $(OBJDIR)/$(NAME).elf
 	"$(TOOLCHAIN)"-objdump -D $< > $@
 
 %.bin: $(OBJDIR)/%.elf
-	$(OBJCOPY) -O binary -R .bss  $< $@
+	$(OBJCOPY) -O binary -R .bss $< $@
 

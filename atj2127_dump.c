@@ -376,6 +376,7 @@ typedef struct {
 } usbs_cmd_t;
 
 static uint32_t scsi_tag = 1;
+static int adfu_chip = 0;
 
 static int check_usbs(usbio_t *io, void *ptr) {
 	usbs_cmd_t *usbs = (usbs_cmd_t*)(ptr ? ptr : io->buf);
@@ -443,9 +444,10 @@ static void write_mem(usbio_t *io,
 static unsigned dump_mem2(usbio_t *io,
 		uint32_t addr, uint32_t size, const char *fn, unsigned step) {
 	unsigned i, n, n2;
-	uint32_t code_addr = 0xbfc1e000 + 1;
-	const uint32_t buf_addr = 0xbfc1e020;
-	static const uint16_t code[] = {
+
+	const uint32_t code_addr_mips = 0xbfc1e000 + 1;
+	const uint32_t buf_addr_mips = 0xbfc1e020;
+	static const uint16_t code_mips[] = {
 		0xb207, /* lw $v0, 2f */
 		0x9a80, /* lw $a0, 0($v0) # addr */
 		0x9aa1, /* lw $a1, 4($v0) # num */
@@ -461,8 +463,34 @@ static unsigned dump_mem2(usbio_t *io,
 		0x61fa, /* btnez 1b */
 		0xe8a0, /* jrc $ra */
 		/* 2: */
-		(buf_addr & 0xffff), buf_addr >> 16,
+		(buf_addr_mips & 0xffff), buf_addr_mips >> 16,
 	};
+
+	const uint32_t code_addr_arm = 0x11e000 + 1;
+	const uint32_t buf_addr_arm = 0x11e020;
+	static const uint16_t code_arm[] = {
+		0x4805, /* ldr r0, 2f */
+		0x0003, /* movs r3, r0 */
+		0xc806, /* ldmia r0!, {r1,r2} */
+		0x6018, /* str r0, [r3] */
+		/* 1: */
+		0xf811, 0x3b01, /* ldrb r3, [r1], #1 */
+		0x3a01, /* subs r2, #1 */
+		0xf800, 0x3b01, /* strb r3, [r0], #1 */
+		0xd1f9, /* bne 1b */
+		0x4800, /* ldr r0, 2f */
+		0x4770, /* bx lr */
+		/* 2: */
+		(buf_addr_arm & 0xffff), buf_addr_arm >> 16,
+	};
+	static const struct {
+		uint32_t addr, buf, size; const uint16_t *code;
+	} code_tab[] = {
+		{ code_addr_mips, buf_addr_mips, sizeof(code_mips), code_mips },
+		{ code_addr_arm, buf_addr_arm, sizeof(code_arm), code_arm },
+	}, *payload;
+
+	payload = &code_tab[adfu_chip == 2157];
 
 	FILE *fo = fopen(fn, "wb");
 	if (!fo) ERR_EXIT("fopen(wb) failed\n");
@@ -474,19 +502,23 @@ static unsigned dump_mem2(usbio_t *io,
 		if (n > step) n = step;
 
 		if (!i) {
-			actions_cmd(io, CMD_ADFU_WRITERAM, sizeof(code), code_addr & ~1, 0, sizeof(code));
-			usb_send(io, code, sizeof(code));
+			actions_cmd(io, CMD_ADFU_WRITERAM, payload->size, payload->addr & ~1, 0, payload->size);
+			usb_send(io, payload->code, payload->size);
 			if (check_usbs(io, NULL)) break;
 		}
 		{
 			uint32_t buf[2] = { addr + i, n };
-			actions_cmd(io, CMD_ADFU_WRITERAM, 8, buf_addr, 0, 8);
+			actions_cmd(io, CMD_ADFU_WRITERAM, 8, payload->buf, 0, 8);
 			usb_send(io, buf, 8);
 			if (check_usbs(io, NULL)) break;
 		}
-		actions_cmd(io, CMD_ADFU_EXEC, 0, code_addr, 0, 0);
+		actions_cmd(io, CMD_ADFU_EXEC, 0, payload->addr, 0, 0);
 		if (check_usbs(io, NULL)) break;
+#if 0
 		actions_cmd(io, CMD_ADFU_READRET, n, 0, 1, n);
+#else // safer for ATJ2157
+		actions_cmd(io, CMD_ADFU_READRAM, n, payload->buf + 8, 1, n);
+#endif
 
 		n2 = n + USBS_LEN;
 		if (usb_recv(io, n2) != (int)n2) {
@@ -612,6 +644,10 @@ static void write_flash(usbio_t *io,
 }
 
 static void adfu_switch(usbio_t *io, uint32_t addr) {
+	if (!adfu_chip) {
+		if (addr >> 20 == 0xbfc) adfu_chip = 2127;
+		if (addr >> 20 == 1) adfu_chip = 2157;
+	}
 	actions_cmd(io, CMD_ADFU_SWITCH, 0, addr, 0, 0);
 	if (check_usbs(io, NULL))
 		ERR_EXIT("switch failed\n");
@@ -1132,7 +1168,7 @@ int main(int argc, char **argv) {
 			addr = str_to_size(argv[2]);
 			fn = argv[3];
 			if (addr >> 32) ERR_EXIT("32-bit limit reached\n");
-			write_mem(io, addr, 0, 0, fn, blk_size);
+			write_mem(io, addr & ~1, 0, 0, fn, blk_size);
 			adfu_switch(io, addr);
 			blk_size = 0x4000;
 			argc -= 3; argv += 3;
@@ -1269,6 +1305,11 @@ int main(int argc, char **argv) {
 				ERR_EXIT("32-bit limit reached\n");
 			write_flash(io, addr, offset, size, fn, blk_size);
 			argc -= 5; argv += 5;
+
+		} else if (!strcmp(argv[1], "chip")) {
+			if (argc <= 2) ERR_EXIT("bad command\n");
+			adfu_chip = atoi(argv[2]);
+			argc -= 2; argv += 2;
 
 		} else if (!strcmp(argv[1], "blk_size")) {
 			if (argc <= 2) ERR_EXIT("bad command\n");

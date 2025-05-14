@@ -60,7 +60,7 @@ static uint32_t nand_select(uint32_t i) {
 	MEM4(0xc009000c) |= 1;
 	old = NAND_REG(0);
 	NAND_REG(0) &= ~0x78;
-	NAND_REG(0) |= (1 << (i + 3)) + 1;
+	NAND_REG(0) |= 8 << i | 1;
 	return old;
 }
 
@@ -88,6 +88,8 @@ static void nand_read_id(uint32_t cs, uint32_t *buf) {
 	NAND_REG(0x24) = 0x69; // cmd_fsm_ctl0: dataats0, srow0, scmd0, fsmenc0
 	NAND_REG(0x38) &= ~0xff;
 	NAND_REG(0x38) |= 1; // fsm_start = 1
+
+	nand_wait();
 	while (!(NAND_REG(4) & 0x10)); // status_rdrq
 	for (i = 0; i < 2; i++)
 		buf[i] = NAND_REG(0x10); // data
