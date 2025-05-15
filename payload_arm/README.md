@@ -24,7 +24,7 @@ Use `NAME=hello` to build `hello.bin`, defaults to building `adfus.bin`.
 
 You can build:
 
-1. `adfus` - ~~reverse engineered binary to run payloads~~ (__TODO__).
+1. `adfus` - reverse engineered binary to run payloads.
 2. `hello` - just an example.
 3. `nandhwsc` - reads NAND flash ID.
 4. `nandread` - ~~binary needed for NAND reading commands~~ (__TODO__).

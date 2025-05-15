@@ -173,10 +173,14 @@ static void usb_send_buf(const void *addr, uint32_t len) {
 	if (rem) usb_send_buf1((char*)addr + len, rem, 1);
 }
 
+#define DEF_CONST_FN(addr, ret, name, args) \
+	static ret (* const name) args = (ret (*) args)(addr);
+
+DEF_CONST_FN(0xbfc1e400, void, flash_fn, (int type, uint32_t sector, uint32_t len, void *buf))
+
 static void cmd_flash(uint32_t cmd, uint32_t addr, uint32_t len) {
 	uint32_t n;
 	void *buf_addr = (void*)0xbfc1a000;
-	void (*flash_fn)(int type, uint32_t sector, uint32_t len, void *buf) = (void(*)())0xbfc1e400;
 
 	if (cmd == 0xff) flash_fn(cmd, 0, 0, 0);
 	for (; len; addr += n, len -= n) {

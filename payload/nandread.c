@@ -15,8 +15,11 @@
 
 #define REG_SAVE_AREA 0xbfc34000
 
+#define DEF_CONST_FN(addr, ret, name, args) \
+	static ret (* const name) args = (ret (*) args)(addr);
+
 #if 0
-static int (* const wait_bits)(uint32_t, uint32_t, uint32_t, uint32_t) = (int(*)())(0xbfc01194 + 1);
+DEF_CONST_FN(0xbfc01194 + 1, int, wait_bits, (uint32_t, uint32_t, uint32_t, unsigned))
 #else
 static int wait_bits(uint32_t addr, uint32_t mask, uint32_t val, unsigned n) {
 	n <<= 10;
@@ -27,7 +30,7 @@ static int wait_bits(uint32_t addr, uint32_t mask, uint32_t val, unsigned n) {
 #endif
 
 #if 0
-static void (* const device_reset)(uint32_t) = (void(*)())(0xbfc01144 + 1);
+DEF_CONST_FN(0xbfc01144 + 1, void, device_reset, (uint32_t))
 #else
 static void device_reset(uint32_t msk) {
 	MEM4(0xc0000000) &= ~msk; // mrcr
@@ -38,7 +41,7 @@ static void device_reset(uint32_t msk) {
 #endif
 
 #if 0
-static void (* const nand_clean)(void) = (void(*)())(0xbfc010a8 + 1);
+DEF_CONST_FN(0xbfc010a8 + 1, void, nand_clean, (void))
 #else
 static void nand_clean(void) {
 	NAND_REG(0) &= ~1;
@@ -48,7 +51,7 @@ static void nand_clean(void) {
 #endif
 
 #if 0
-static void (* const nand_init)(void) = (void(*)())(0xbfc00ec8 + 1);
+DEF_CONST_FN(0xbfc00ec8 + 1, void, nand_init, (void))
 #else
 static void nand_init(void) {
 	uint32_t buf = REG_SAVE_AREA;
@@ -84,7 +87,7 @@ static void nand_init(void) {
 #endif
 
 #if 0
-static void (* const nand_deinit)(void) = (void(*)())(0xbfc01020 + 1);
+DEF_CONST_FN(0xbfc01020 + 1, void, nand_deinit, (void))
 #else
 static void nand_deinit(void) {
 	uint32_t buf = REG_SAVE_AREA;
@@ -121,7 +124,7 @@ static nand_args_t * const nand_args = (void*)0xbfc341e0;
 static nand_conf_t * const nand_conf = (void*)0xbfc341f4;
 
 #if 0
-static int (* const nand_read)(void*, const void*) = (int(*)())(0xbfc012f8 + 1);
+DEF_CONST_FN(0xbfc012f8 + 1, int, nand_read, (void*, const void*))
 #else
 extern int nand_read0(nand_args_t *args, const nand_conf_t *conf);
 static int nand_read(nand_args_t *args, const nand_conf_t *conf) {
@@ -251,7 +254,7 @@ static int nand_read(nand_args_t *args, const nand_conf_t *conf) {
 #endif
 
 #if 0
-static int (* const test_checksum)(const void*, unsigned) = (int(*)())(0xbfc00458 + 1);
+DEF_CONST_FN(0xbfc00458 + 1, int, test_checksum, (const void*, unsigned))
 #else
 static int test_checksum(const void *addr, unsigned n) {
 	const uint16_t *p = addr;
@@ -262,7 +265,7 @@ static int test_checksum(const void *addr, unsigned n) {
 #endif
 
 #if 0
-static int (* const try_read_mbrec)(void) = (int(*)())(0xbfc00d94 + 1);
+DEF_CONST_FN(0xbfc00d94 + 1, int, try_read_mbrec, (void))
 #else
 static int try_read_mbrec(void) {
 	unsigned i;
@@ -303,7 +306,7 @@ static int try_read_mbrec(void) {
 #endif
 
 #if 0
-static void (* const nand_reset)(void) = (void(*)())(0xbfc010ec + 1);
+DEF_CONST_FN(0xbfc010ec + 1, void, nand_reset, (void))
 #else
 static void nand_reset(void) {
 	NAND_REG(0x20) = 0xff; // Reset
@@ -320,7 +323,7 @@ static void nand_reset(void) {
 #endif
 
 #if 0
-static int (* const nand_set_features)(void) = (int(*)())(0xbfc011ec + 1);
+DEF_CONST_FN(0xbfc011ec + 1, int, nand_set_features, (void))
 #else
 static int nand_set_features(void) {
 	uint32_t old0, old1, old2, old3;
@@ -358,7 +361,7 @@ static int nand_set_features(void) {
 #endif
 
 #if 0
-static int (* const read_mbrec)(void) = (int(*)())(0xbfc00cb0 + 1);
+DEF_CONST_FN(0xbfc00cb0 + 1, int, read_mbrec, (void))
 #else
 static int read_mbrec(void) {
 	int i, j, ret;
