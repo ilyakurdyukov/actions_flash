@@ -27,7 +27,7 @@ You can build:
 1. `adfus` - reverse engineered binary to run payloads.
 2. `hello` - just an example.
 3. `nandhwsc` - reads NAND flash ID.
-4. `nandread` - ~~binary needed for NAND reading commands~~ (__TODO__).
+4. `nandread` - binary needed for NAND reading commands.
 
 #### with GCC from the old NDK
 
