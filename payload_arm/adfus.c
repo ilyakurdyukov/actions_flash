@@ -19,11 +19,12 @@
 #define RTC_BASE 0xc0030000
 #define PMU_BASE 0xc0010000
 
-static uint32_t switch_addr;
+static volatile uint32_t switch_addr;
 static struct { void *addr; unsigned size; } *exec_result;
-static uint8_t blk_size, fwsc_flag;
-static uint8_t switch_loop;
-static uint8_t switch_flag;
+static uint8_t blk_size;
+static volatile uint8_t fwsc_flag;
+static volatile uint8_t switch_loop;
+static volatile uint8_t switch_flag;
 static char usbs_error;
 
 typedef void (*handler_t)(void);
@@ -54,6 +55,7 @@ void entry_main(void) {
 	MEM4(0xe000ed08) = (uint32_t)vec_table; // VTOR
 
 	blk_size = 0x20;
+	fwsc_flag = 0;
 	switch_loop = 0x55;
 	switch_addr = 0;
 	switch_flag = 0;
@@ -109,7 +111,7 @@ static int usb_send_recv(void *p0, int a1, unsigned len, int a3) {
 		if (n > 0x10000) n = 0x10000;
 		len -= n;
 		USB_REG(0x308 + a1 * 8) = n << 8 | a3 << 1;
-		USB_REG(0x30C + a1 * 8) = (uint32_t)p; p += n;
+		USB_REG(0x30c + a1 * 8) = (uint32_t)p; p += n;
 		USB_REG(0x330) = 1;
 		USB_REG(0x308 + a1 * 8) |= 1;
 		usb_wait(a1);
@@ -165,14 +167,14 @@ static void cmd_vendor(void) {
 		else usb_recv_buf((void*)addr, len);
 		break;
 	case 0x20:
-		switch_addr = addr;
+		switch_addr = addr | 1;
 		switch_flag = 1;
 		break;
 	case 0x21:
 		wd_clear();
 		{
 			void *r; char *p;
-			exec_result = r = ((void* (*)(void))addr)();
+			exec_result = r = ((void* (*)(void))(addr | 1))();
 			p = *(char**)r;
 			if (p[6] == 'N') {
 				uint32_t x = *(uint32_t*)&p[0x58];
@@ -185,8 +187,8 @@ static void cmd_vendor(void) {
 	case 0x23:
 		{
 			char *p = exec_result->addr;
-  		if (p[8] == 'F' && p[9] == 'W' && p[10] == 'S' && p[11] == 'C')
-   			fwsc_flag = p[12];
+			if (p[8] == 'F' && p[9] == 'W' && p[10] == 'S' && p[11] == 'C')
+				fwsc_flag = p[12];
 			usb_send_buf(p, len);
 		}
 		break;
@@ -200,12 +202,15 @@ static void cmd_vendor(void) {
 }
 
 static void parse_usb_cmd(void) {
-	if (usbs_error) return;
-  wd_clear();
+	if (usbs_error) {
+		switch_loop = 0x77;
+		return;
+	}
+	wd_clear();
 	if (USB_REG(0x1b8) != 0x1f ||
 			usb_recv_buf(&usb_buf, 0x1f) ||
 			*(uint32_t*)usb_buf != USBC_SIG) {
-    usbs_error = 2;
+		usbs_error = 2;
 		return;
 	}
 	switch (usb_buf[15]) {
@@ -213,29 +218,30 @@ static void parse_usb_cmd(void) {
 	case 0xcd: cmd_vendor(); break;
 	case 0xb0:
 		ret_usbs();
-    switch_loop = 0x77;
+		switch_loop = 0x77;
 		break;
 	default:
 		usbs_error = 2;
+		ret_usbs();
 	}
 }
 
 static void int_main(void) {
-  uint32_t t0, t1;
+	uint32_t t0, t1;
 
-  wd_clear();
-  t1 = USB_REG(0x140) & ~USB_REG(0x130);
-  if (t1 & 4) {
-    t0 = USB_REG(0x14c) & ~USB_REG(0x13c);
-    if (t0 & 1) USB_REG(0x14c) = 1;
-    if (t0 & 2) {
-      switch_loop = 0x77;
-      USB_REG(0x14c) = 2;
-    }
-    if (t0 & 4) USB_REG(0x14c) = 4;
-  }
-  if (t1 & 2) {
-    t0 = USB_REG(0x148) & ~USB_REG(0x138);
-    if (t0 & 0x20) parse_usb_cmd();
-  }
+	wd_clear();
+	t1 = USB_REG(0x140) & ~USB_REG(0x130);
+	if (t1 & 4) {
+		t0 = USB_REG(0x14c) & ~USB_REG(0x13c);
+		if (t0 & 1) USB_REG(0x14c) = 1;
+		if (t0 & 2) {
+			switch_loop = 0x77;
+			USB_REG(0x14c) = 2;
+		}
+		if (t0 & 4) USB_REG(0x14c) = 4;
+	}
+	if (t1 & 2) {
+		t0 = USB_REG(0x148) & ~USB_REG(0x138);
+		if (t0 & 0x20) parse_usb_cmd();
+	}
 }

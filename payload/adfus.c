@@ -24,11 +24,11 @@
 
 extern void int_enable(void);
 
-static uint32_t switch_addr;
+static volatile uint32_t switch_addr;
 static struct { void *addr; unsigned size; } *exec_result;
 static uint16_t usb_blksize;
-static uint8_t switch_loop;
-static uint8_t switch_flag;
+static volatile uint8_t switch_loop;
+static volatile uint8_t switch_flag;
 static char usbs_error;
 static uint32_t scsi_tag;
 
@@ -236,7 +236,7 @@ static void cmd_vendor(void) {
 
 static void parse_usb_cmd(void) {
 	uint32_t cmd;
-	if (usbs_error) return;
+	if (usbs_error) { cmd_reset(); return; }
 	cmd = USB_REG(0x88);
 	if (cmd != USBC_SIG) {
 		usbs_error = 2;

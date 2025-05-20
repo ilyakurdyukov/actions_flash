@@ -13,10 +13,17 @@
 #define NAND_BASE 0xc0070000
 #define NAND_REG(x) MEM4(NAND_BASE + x)
 
+#define RTC_BASE 0xc0120000
+
 #define REG_SAVE_AREA 0xbfc34000
 
 #define DEF_CONST_FN(addr, ret, name, args) \
 	static ret (* const name) args = (ret (*) args)(addr);
+
+// watchdog
+static inline void wd_clear(void) {
+	MEM4(RTC_BASE + 0x1c) |= 1;
+}
 
 #if 0
 DEF_CONST_FN(0xbfc01194 + 1, int, wait_bits, (uint32_t, uint32_t, uint32_t, unsigned))
@@ -153,20 +160,19 @@ static int nand_read(nand_args_t *args, const nand_conf_t *conf) {
 	NAND_REG(8) |= (conf->b1 - 1) << 4;
 	NAND_REG(0x38) |= 0x84;
 	NAND_REG(8) &= ~0x303;
-	NAND_REG(0xc) = 0x400;
 
-	udata_size = 4;
 	if (!conf->b4) NAND_REG(0x38) &= ~4;
-	if (conf->b4 < 0xd) {
-		NAND_REG(0xc) = 0x200;
-		udata_size = 2;
-	} else if (conf->b4 < 0x19) {
-		NAND_REG(8) |= 0x101;
-	} else if (conf->b4 < 0x29) {
-		NAND_REG(8) |= 0x102;
-	} else {
-		NAND_REG(8) |= 0x103;
+	udata_size = 2;
+	if (conf->b4 > 0xc) {
+		// x <= 0x18 : 0x101
+		// x <= 0x28 : 0x102
+		// else      : 0x103
+		unsigned tmp = (conf->b4 + 7) >> 4;
+		if (tmp > 3) tmp = 3;
+		NAND_REG(8) |= tmp | 0x100;
+		udata_size = 4;
 	}
+	NAND_REG(0xc) = udata_size << 8;
 
 	if (conf->b5 < 3) {
 		uint32_t readmsk, coladdr;
@@ -290,7 +296,7 @@ static int try_read_mbrec(void) {
 	for (i = 0; i < sizeof(tab) / sizeof(*tab); i++) {
 		uint8_t *buf; int n;
 
-		MEM4(0xc012001c) |= 1;
+		wd_clear();
 		MEM4(nand_conf) = tab[i][0];
 		MEM2(&nand_conf->b4) = tab[i][1];
 		MEM4(&nand_conf->h8) = tab[i][2];
@@ -312,13 +318,8 @@ static void nand_reset(void) {
 	NAND_REG(0x20) = 0xff; // Reset
 	NAND_REG(0x24) = 0x62;
 	NAND_REG(0x38) |= 1;
-#if 1
 	wait_bits(NAND_BASE + 4, 1u << 31, 0, 100);
 	wait_bits(NAND_BASE + 4, 2, 2, 2);
-#else
-	while ((int32_t)NAND_REG(4) < 0);
-	while (!(NAND_REG(4) & 2));
-#endif
 }
 #endif
 
@@ -342,16 +343,12 @@ static int nand_set_features(void) {
 	NAND_REG(0x20) = 0xef; // Set Features
 	NAND_REG(0x24) = 0x69;
 	NAND_REG(0x38) |= 3;
-#if 1
+
 	ret = wait_bits(NAND_BASE + 4, 0x10, 0x10, 2);
+	NAND_REG(0x10) = 0;
 	ret |= wait_bits(NAND_BASE + 4, 1u << 31, 0, 2);
 	ret |= wait_bits(NAND_BASE + 4, 2, 2, 2);
-#else
-	while (!(NAND_REG(4) & 0x10));
-	while ((int32_t)NAND_REG(4) < 0);
-	while (!(NAND_REG(4) & 2));
-	ret = 0;
-#endif
+
 	NAND_REG(0) = old0;
 	NAND_REG(8) = old1;
 	NAND_REG(0xc) = old2;
@@ -366,7 +363,7 @@ DEF_CONST_FN(0xbfc00cb0 + 1, int, read_mbrec, (void))
 static int read_mbrec(void) {
 	int i, j, ret;
 
-	MEM4(0xc012001c) |= 1;
+	wd_clear();
 	NAND_REG(0) &= ~0x78;
 	NAND_REG(0) |= 9;
 
@@ -398,6 +395,7 @@ void* entry_main(void) {
 
 #if 0 // debug
 	flags = 7;
+	p[5] = 0xbfc1a000;
 #endif
 
 	if (flags & 1) {
@@ -411,13 +409,8 @@ void* entry_main(void) {
 	}
 	if (flags & 2) {
 		uint8_t *mbrec = (void*)p[5];
-		MEM4(0xc012001c) |= 1; // watchdog clear
-#if 0
-		NAND_REG(0) &= ~0x78;
-		NAND_REG(0) |= 9;
-		nand_reset();
-		if (nand_conf->cmd_fe) nand_set_features();
-#else
+		wd_clear();
+
 		NAND_REG(8) &= ~0xf0;
 		NAND_REG(0x38) &= ~0x1c;
 		NAND_REG(0x38) |= 0x9c;
@@ -449,15 +442,13 @@ void* entry_main(void) {
 		if (nand_conf->h8 == 0xc0) nand_conf->h8 = 0x100;
 		nand_args->rowaddr = mbrec[3 + 0] * nand_conf->h8;
 		{
-			int x = nand_conf->psec;
-			if (x > 31) x = 31;
-			nand_args->readmsk = (1u << x) - 1;
+			unsigned x = nand_conf->psec;
+			nand_args->readmsk = (2u << (x - 1)) - 1;
 		}
-#endif
 		p[4] = 4;
 	}
 	if (flags & 4) {
-		MEM4(0xc012001c) |= 1; // watchdog clear
+		wd_clear();
 		nand_read(nand_args, nand_conf);
 	}
 end:

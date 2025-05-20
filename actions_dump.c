@@ -702,13 +702,20 @@ static void nandread_init(usbio_t *io, nandread_t *x, const char *nandread_fn,
 	unsigned n, psize;
 	uint8_t *mem, buf[8];
 
-	x->code_addr = 0xbfc1e000;
-	x->buf_addr = 0xbfc1a000;
-	x->args_addr = 0x9fc1fff0;
-	x->nand_args = 0xbfc341e0;
+	if (adfu_chip == 2157) {
+		x->code_addr = 0x11e000;
+		x->buf_addr = 0x11a000;
+		x->args_addr = 0x11fff0;
+		x->nand_args = 0x100920;
+	} else {
+		x->code_addr = 0xbfc1e000;
+		x->buf_addr = 0xbfc1a000;
+		x->args_addr = 0x9fc1fff0;
+		x->nand_args = 0xbfc341e0;
+	}
 	x->blk_size = blk_size;
 
-	write_mem(io, x->code_addr, 0, 0, nandread_fn, blk_size);
+	write_mem(io, x->code_addr & ~1, 0, 0, nandread_fn, blk_size);
 	WRITE32_LE(buf, 3);
 	WRITE32_LE(buf + 4, x->buf_addr);
 	write_mem_buf(io, x->args_addr, 8, buf, 8);
@@ -877,8 +884,8 @@ static void find_lfi(usbio_t *io, nandread_t *x, int brec_idx, const char *dump_
 	{
 		uint8_t buf[4];
 		uint32_t n = 1;
-		if (mem[7] < 0xd) n <<= 1;
-		if (mem[8] == 4) n <<= 1;
+		if (mem[9] <= 0xc) n <<= 1;
+		if (adfu_chip != 2157 && mem[9] >= 0x18) n <<= 1;
 		n = (1 << n) - 1;
 		WRITE32_LE(buf, n);
 		write_mem_buf(io, x->nand_args + 8, 4, buf, 4);
@@ -916,8 +923,8 @@ static void find_lfi(usbio_t *io, nandread_t *x, int brec_idx, const char *dump_
 	{
 		uint8_t buf[4];
 		uint32_t n = mem[5];
-		if (n > 31) n = 31;
-		n = (1u << n) - 1;
+		if (adfu_chip == 2157 && mem[9] >= 0x18) n >>= 1;
+		n = (2u << (n - 1)) - 1;
 		WRITE32_LE(buf, n);
 		write_mem_buf(io, x->nand_args + 8, 4, buf, 4);
 	}
