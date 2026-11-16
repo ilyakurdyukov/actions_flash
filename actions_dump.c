@@ -845,7 +845,7 @@ static void dump_nand(usbio_t *io, nandread_t *x,
 	unsigned i, psize = x->psize;
 	FILE *fo = NULL;
 
-	if (fo) {
+	if (fn) {
 		fo = fopen(fn, "wb");
 		if (!fo) ERR_EXIT("fopen(wb) failed\n");
 	} else if (!print_tags) return;
