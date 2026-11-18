@@ -74,26 +74,7 @@ The commands below require loading the `adfus` binary that comes with the tool (
 `write_flash <sector> <file_offset> <size> <input_file>` - write flash (requires correct `fwscfNNN.bin`).  
 `read_brec <payload/readnand.bin> <mbrec_dump.bin> <brec_idx> <brec_dump.bin>` - read boot record (`brec_idx` is 0 or 1).  
 `read_nand <payload/readnand.bin> <rowaddr> <count> <output_file>` - read raw pages from nand flash.  
-`find_lfi <payload/readnand.bin> <brec_idx> <lfi_dump.bin>` - tries to find and dump the LFI chain, then checks both copies the way the boot record does (header, file checksums, total size).  
-`nand_psize <size>` - page size of the data area for the next `read_nand` and `find_lfi` commands (0 means the size from mbrec, which is used until this command is given).  
-
-#### Data area page size
-
-The NAND commands read pages with the geometry from mbrec. On some devices this geometry is valid only for the boot area: an ATJ2157 voice recorder (NAND ID `89 64 64 3c a1 0c`) has 8K pages in mbrec, but its data area, where the LFI is stored, uses 16K pages. With the wrong page size the spare bytes are read from the wrong offset, the tags are garbage and `find_lfi` reports "no LFI nodes found". Set the page size before the command:
-```
-sudo ./actions_dump chip 2157 \
-	simple_switch 0x118000 adfus.bin \
-	nand_psize 16K find_lfi nandread.bin 0 lfi_raw.bin
-```
-
-* `find_lfi` applies `nand_psize` after reading the boot record, which always uses the mbrec geometry.
-
-The first spare bytes of the first page of a block (printed by `read_nand` and `find_lfi`) tell what the block holds:
-
-* `ff 40 <n> 00` - LFI, `n` is the block number in the chain (0, 1 for the first copy and 2, 3 for the second on that recorder).
-* `ff 48 <n> 00` - user data (FTL), not the LFI.
-* `ff 9x`..`ff ex` - system blocks.
-* `ff ff ...` - erased block.
+`find_lfi <payload/readnand.bin> <brec_idx> <lfi_dump.bin>` - tries to find and dump the LFI chain (uses the data area page size from the boot record, which can be larger than the page size in mbrec).  
 
 #### Repeating the flashing process (ATJ2127)
 
