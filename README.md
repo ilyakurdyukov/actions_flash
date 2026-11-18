@@ -74,7 +74,7 @@ The commands below require loading the `adfus` binary that comes with the tool (
 `write_flash <sector> <file_offset> <size> <input_file>` - write flash (requires correct `fwscfNNN.bin`).  
 `read_brec <payload/readnand.bin> <mbrec_dump.bin> <brec_idx> <brec_dump.bin>` - read boot record (`brec_idx` is 0 or 1).  
 `read_nand <payload/readnand.bin> <rowaddr> <count> <output_file>` - read raw pages from nand flash.  
-`find_lfi <payload/readnand.bin> <brec_idx> <lfi_dump.bin>` - tries to find and dump the LFI chain.  
+`find_lfi <payload/readnand.bin> <brec_idx> <lfi_dump.bin>` - tries to find and dump the LFI chain (uses the data area page size from the boot record, which can be larger than the page size in mbrec).  
 
 #### Repeating the flashing process (ATJ2127)
 
