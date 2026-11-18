@@ -885,57 +885,7 @@ static void dump_nand(usbio_t *io, nandread_t *x,
 	if (fo) fclose(fo);
 }
 
-// same checks as the boot record does
-static int check_lfi(const uint8_t *mem, size_t size, uint32_t fw_size) {
-	static const char skip[] = "TBL$$$FONSTYRES";
-	unsigned i, j; int n, m, ok = 1;
-	uint32_t off, len, sum, total = 0x10;
-
-	if (size < 0x2000 || READ32_LE(mem) != 0x0ff0aa55) {
-		printf("bad LFI magic\n");
-		return 0;
-	}
-	for (sum = i = 0; i < 0x1fe; i += 2) sum += READ16_LE(mem + i);
-	if ((uint16_t)sum != READ16_LE(mem + 0x1fe)) {
-		printf("bad LFI header checksum\n");
-		return 0;
-	}
-	for (i = 0x200; i < 0x2000; i += 0x20) {
-		const uint8_t *p = mem + i;
-		if (!p[0]) break;
-		off = READ32_LE(p + 0x10);
-		len = READ32_LE(p + 0x14) >> 9;
-		total += len;
-		for (n = 8; n && p[n - 1] == ' '; n--);
-		for (m = 3; m && p[7 + m] == ' '; m--);
-		printf("%.*s.%.*s: ", n, p, m, p + 8);
-		for (j = 0; skip[j]; j += 3)
-			if (!memcmp(p + 8, skip + j, 3)) break;
-		if (skip[j]) {
-			printf("not checked\n");
-			continue;
-		}
-		if (off > size >> 9 || len > (size >> 9) - off) {
-			printf("BAD (outside the dump)\n");
-			ok = 0;
-			continue;
-		}
-		p = mem + ((size_t)off << 9);
-		for (sum = j = 0; j < len << 9; j += 4) sum += READ32_LE(p + j);
-		if (sum != (uint32_t)READ32_LE(mem + i + 0x1c)) {
-			printf("BAD\n");
-			ok = 0;
-		} else printf("ok\n");
-	}
-	if (total != fw_size) {
-		printf("LFI size mismatch (0x%x sectors, expected 0x%x)\n", total, fw_size);
-		ok = 0;
-	}
-	return ok;
-}
-
-static void find_lfi(usbio_t *io, nandread_t *x, int brec_idx,
-		const char *dump_fn, unsigned data_psize) {
+static void find_lfi(usbio_t *io, nandread_t *x, int brec_idx, const char *dump_fn) {
 	uint8_t *mem = x->mem;
 	FILE *fo;
 	unsigned i, j, k, err = 0, psize;
@@ -944,7 +894,12 @@ static void find_lfi(usbio_t *io, nandread_t *x, int brec_idx,
 
 	fw_size = dump_brec(io, x, brec_idx, NULL);
 	if (!fw_size) ERR_EXIT("firmware size is unknown\n");
-	if (data_psize) nandread_psize(io, x, data_psize);
+	// mbrec describes the boot area, the brec has the geometry of
+	// the data area (sectors per page at 0x89), which can use larger pages
+	psize = mem[0x400 + 0x89] << 9;
+	if (psize && psize != x->psize &&
+			!(psize & (psize - 1)) && !(psize & ~0x7e00))
+		nandread_psize(io, x, psize);
 	psize = x->psize;
 
 	npages = READ16_LE(mem + 0xc);
@@ -982,7 +937,7 @@ static void find_lfi(usbio_t *io, nandread_t *x, int brec_idx,
 	}
 	for (k = 256; k; k--) if (~tab[k - 1]) break;
 	if (!k) {
-		DBG_LOG("!!! no LFI nodes found (wrong nand_psize?)\n");
+		DBG_LOG("!!! no LFI nodes found\n");
 		return;
 	}
 	for (i = 0; i < k; i++) if (!~tab[i]) break;
@@ -1012,20 +967,7 @@ static void find_lfi(usbio_t *io, nandread_t *x, int brec_idx,
 	}
 	fclose(fo);
 
-	{
-		size_t size, half = (size_t)(k >> 1) * npages * psize;
-		uint8_t *buf = loadfile(dump_fn, &size);
-		if (!buf) ERR_EXIT("loadfile(\"%s\") failed\n", dump_fn);
-		for (i = 0; i < 2; i++) {
-			if (i && !half) break;
-			printf("LFI copy %u:\n", i);
-			printf("LFI copy %u: %s\n", i, check_lfi(buf + i * half,
-					half ? (i ? size - half : half) : size, fw_size) ? "OK" : "FAILED");
-		}
-		free(buf);
-	}
-
-	printf("The raw LFI dump should contain two copies of the firmware, both may be corrupted in different places, use this command to check and repair the LFI:\n  ./fwhelper <lfi_raw.bin> lfi_repair 0x%x 0x%x 0x%x <lfi_out.bin>\n", fw_size, npages, psize);
+	printf("The raw LFI dump should contain two copies of the firmware, both may be corrupted in different places, use these commands to check and repair the LFI:\n  ./fwhelper <lfi_raw.bin> check_lfi 0x%x\n  ./fwhelper <lfi_raw.bin> lfi_repair 0x%x 0x%x 0x%x <lfi_out.bin>\n", fw_size, fw_size, npages, psize);
 }
 
 static uint64_t str_to_size(const char *str) {
@@ -1067,7 +1009,6 @@ int main(int argc, char **argv) {
 	// flashdisk = 10d6:1101, ADFU mode = 10d6:10d6
 	int id_vendor = 0x10d6, id_product = 0x10d6;
 	int blk_size = 0x200;
-	unsigned nand_psize = 0;
 
 #if USE_LIBUSB
 	ret = libusb_init(NULL);
@@ -1349,7 +1290,6 @@ int main(int argc, char **argv) {
 			len = strtol(argv[4], NULL, 0);
 
 			nandread_init(io, &x, argv[2], NULL, blk_size);
-			if (nand_psize) nandread_psize(io, &x, nand_psize);
 			dump_nand(io, &x, fn_helper(argv[5]), start, len, 1);
 			nandread_end(io, &x);
 			argc -= 5; argv += 5;
@@ -1364,7 +1304,7 @@ int main(int argc, char **argv) {
 				ERR_EXIT("brec_idx must be 0 or 1\n");
 
 			nandread_init(io, &x, argv[2], NULL, blk_size);
-			find_lfi(io, &x, brec_idx, fn_helper(argv[4]), nand_psize);
+			find_lfi(io, &x, brec_idx, fn_helper(argv[4]));
 			nandread_end(io, &x);
 			argc -= 4; argv += 4;
 
@@ -1408,15 +1348,6 @@ int main(int argc, char **argv) {
 			blk_size = str_to_size(argv[2]);
 			blk_size = blk_size < 0 ? 1 :
 					blk_size > 0x4000 ? 0x4000 : blk_size;
-			argc -= 2; argv += 2;
-
-		} else if (!strcmp(argv[1], "nand_psize")) {
-			uint64_t n;
-			if (argc <= 2) ERR_EXIT("bad command\n");
-			n = str_to_size(argv[2]); // pow2, 0x200..0x4000, 0 = from mbrec
-			if ((n & (n - 1)) || (n & ~0x7e00))
-				ERR_EXIT("unexpected page size\n");
-			nand_psize = n;
 			argc -= 2; argv += 2;
 
 		} else if (!strcmp(argv[1], "timeout")) {
