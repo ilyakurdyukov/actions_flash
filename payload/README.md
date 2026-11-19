@@ -52,6 +52,6 @@ make all TOOLCHAIN="$TOOLCHAIN" SYSROOT="$SYSROOT"
 ```
 CLANG="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/clang -target mipsel-none-linux-androideabi -gcc-toolchain $NDK/toolchains/mipsel-linux-android-4.9/prebuilt/linux-x86_64"
 
-make all TOOLCHAIN="$TOOLCHAIN" SYSROOT="$SYSROOT" CC="$CLANG MIPS=32"
+make all TOOLCHAIN="$TOOLCHAIN" SYSROOT="$SYSROOT" CC="$CLANG" MIPS=32
 ```
 
