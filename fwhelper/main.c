@@ -162,10 +162,12 @@ static int check_lfi_head(uint8_t *mem) {
 	return 0;
 }
 
-// the checks the ATJ2157 boot record does before it starts the firmware
+// checks every file in the LFI; the ATJ2157 boot record skips these extensions (to boot faster),
+// so a bad one is marked "(not checked by brec)": the device still boots with it
 static int check_lfi(uint8_t *mem, uint32_t size, uint32_t fw_size) {
 	static const char skip[] = "TBL$$$FONSTYRES";
 	unsigned i, j; int n, m, ok = 1;
+	const char *note;
 	uint32_t off, len, total = 0x10;
 
 	if (size < 0x2000 || check_lfi_head(mem)) {
@@ -183,17 +185,14 @@ static int check_lfi(uint8_t *mem, uint32_t size, uint32_t fw_size) {
 		printf("%.*s.%.*s: ", n, p, m, p + 8);
 		for (j = 0; skip[j]; j += 3)
 			if (!memcmp(p + 8, skip + j, 3)) break;
-		if (skip[j]) {
-			printf("not checked\n");
-			continue;
-		}
+		note = skip[j] ? " (not checked by brec)" : "";
 		if (off > size >> 9 || len > (size >> 9) - off) {
-			printf("BAD (outside the dump)\n");
+			printf("BAD (outside the dump)%s\n", note);
 			ok = 0;
 			continue;
 		}
 		if (fw_checksum32(mem + (off << 9), len << 9) != (uint32_t)READ32_LE(p + 0x1c)) {
-			printf("BAD\n");
+			printf("BAD%s\n", note);
 			ok = 0;
 		} else printf("ok\n");
 	}
