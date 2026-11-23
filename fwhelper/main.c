@@ -162,6 +162,47 @@ static int check_lfi_head(uint8_t *mem) {
 	return 0;
 }
 
+// checks every file in the LFI; the ATJ2157 boot record skips these extensions (to boot faster),
+// so a bad one is marked "(not checked by brec)": the device still boots with it
+static int check_lfi(uint8_t *mem, uint32_t size, uint32_t fw_size) {
+	static const char skip[] = "TBL$$$FONSTYRES";
+	unsigned i, j; int n, m, ok = 1;
+	const char *note;
+	uint32_t off, len, total = 0x10;
+
+	if (size < 0x2000 || check_lfi_head(mem)) {
+		printf("bad LFI header\n");
+		return 0;
+	}
+	for (i = 0x200; i < 0x2000; i += 0x20) {
+		uint8_t *p = mem + i;
+		if (!p[0]) break;
+		off = READ32_LE(p + 0x10);
+		len = READ32_LE(p + 0x14) >> 9; // whole sectors
+		total += len;
+		for (n = 8; n && p[n - 1] == ' '; n--);
+		for (m = 3; m && p[7 + m] == ' '; m--);
+		printf("%.*s.%.*s: ", n, p, m, p + 8);
+		for (j = 0; skip[j]; j += 3)
+			if (!memcmp(p + 8, skip + j, 3)) break;
+		note = skip[j] ? " (not checked by brec)" : "";
+		if (off > size >> 9 || len > (size >> 9) - off) {
+			printf("BAD (outside the dump)%s\n", note);
+			ok = 0;
+			continue;
+		}
+		if (fw_checksum32(mem + (off << 9), len << 9) != (uint32_t)READ32_LE(p + 0x1c)) {
+			printf("BAD%s\n", note);
+			ok = 0;
+		} else printf("ok\n");
+	}
+	if (total != fw_size) {
+		printf("LFI size mismatch (0x%x sectors, expected 0x%x)\n", total, fw_size);
+		ok = 0;
+	}
+	return ok;
+}
+
 static int repair_file(uint8_t *mem, uint8_t *mem2, uint32_t psize,
 		uint32_t off, uint32_t len, uint32_t chk0) {
 	uint32_t bad_blocks[31][2];
@@ -273,6 +314,23 @@ int main(int argc, char **argv) {
 		} else if (!strcmp(argv[1], "scan_file")) {
 			scan_file(mem, size);
 			argc -= 1; argv += 1;
+		} else if (!strcmp(argv[1], "check_lfi")) {
+			uint32_t fw_size, half; unsigned i;
+			if (argc <= 2) ERR_EXIT("bad command\n");
+			fw_size = strtol(argv[2], NULL, 0);
+			if (fw_size < 0x2200 >> 9)
+				ERR_EXIT("firmware size is too small\n");
+			if (fw_size >> (32 - 9))
+				ERR_EXIT("firmware size is too big\n");
+			// a raw dump has two copies, the second starts in the middle
+			half = size >> 1 < fw_size << 9 ? 0 : size >> 1;
+			for (i = 0; i < 2; i++) {
+				if (i && !half) break;
+				printf("LFI copy %u:\n", i);
+				printf("LFI copy %u: %s\n", i, check_lfi(mem + i * half,
+						half ? half : size, fw_size) ? "OK" : "FAILED");
+			}
+			argc -= 2; argv += 2;
 		} else if (!strcmp(argv[1], "lfi_repair")) {
 			uint32_t fw_size, npages, psize;
 			const char *out_fn;

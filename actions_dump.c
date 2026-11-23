@@ -771,6 +771,27 @@ static void nandread_end(usbio_t *io, nandread_t *x) {
 	free(x->mem);
 }
 
+static uint32_t nand_readmsk(nandread_t *x) {
+	uint32_t n = x->psize >> 9;
+	if (adfu_chip == 2157 && x->mem[9] >= 0x18) n >>= 1;
+	return (2u << (n - 1)) - 1;
+}
+
+// the data area can use larger pages than mbrec describes
+static void nandread_psize(usbio_t *io, nandread_t *x, unsigned psize) {
+	uint8_t buf[12];
+	uint32_t conf = x->nand_args + 0x14;
+	read_mem_buf(io, conf, 12, buf, 12);
+	buf[0] = psize >> 9;
+	buf[10] = psize;
+	buf[11] = psize >> 8;
+	write_mem_buf(io, conf, 12, buf, 12);
+	x->psize = psize;
+	WRITE32_LE(buf, nand_readmsk(x));
+	write_mem_buf(io, x->nand_args + 8, 4, buf, 4);
+	DBG_LOG("page size = 0x%x\n", psize);
+}
+
 static uint32_t dump_brec(usbio_t *io, nandread_t *x,
 		unsigned brec_idx, const char *brec_fn) {
 	uint8_t *mem = x->mem;
@@ -845,7 +866,7 @@ static void dump_nand(usbio_t *io, nandread_t *x,
 	unsigned i, psize = x->psize;
 	FILE *fo = NULL;
 
-	if (fo) {
+	if (fn) {
 		fo = fopen(fn, "wb");
 		if (!fo) ERR_EXIT("fopen(wb) failed\n");
 	} else if (!print_tags) return;
@@ -867,12 +888,19 @@ static void dump_nand(usbio_t *io, nandread_t *x,
 static void find_lfi(usbio_t *io, nandread_t *x, int brec_idx, const char *dump_fn) {
 	uint8_t *mem = x->mem;
 	FILE *fo;
-	unsigned i, j, k, err = 0, psize = x->psize;
+	unsigned i, j, k, err = 0, psize;
 	unsigned fw_size, npages, npages2, nblock;
 	uint32_t tab[256];
 
 	fw_size = dump_brec(io, x, brec_idx, NULL);
 	if (!fw_size) ERR_EXIT("firmware size is unknown\n");
+	// mbrec describes the boot area, the brec has the geometry of
+	// the data area (sectors per page at 0x89), which can use larger pages
+	psize = mem[0x400 + 0x89] << 9;
+	if (psize && psize != x->psize &&
+			!(psize & (psize - 1)) && !(psize & ~0x7e00))
+		nandread_psize(io, x, psize);
+	psize = x->psize;
 
 	npages = READ16_LE(mem + 0xc);
 	npages2 = npages == 0xc0 ? 0x100 : npages;
@@ -922,10 +950,7 @@ static void find_lfi(usbio_t *io, nandread_t *x, int brec_idx, const char *dump_
 	// restore old value
 	{
 		uint8_t buf[4];
-		uint32_t n = mem[5];
-		if (adfu_chip == 2157 && mem[9] >= 0x18) n >>= 1;
-		n = (2u << (n - 1)) - 1;
-		WRITE32_LE(buf, n);
+		WRITE32_LE(buf, nand_readmsk(x));
 		write_mem_buf(io, x->nand_args + 8, 4, buf, 4);
 	}
 
@@ -942,7 +967,7 @@ static void find_lfi(usbio_t *io, nandread_t *x, int brec_idx, const char *dump_
 	}
 	fclose(fo);
 
-	printf("The raw LFI dump should contain two copies of the firmware, both may be corrupted in different places, use this command to check and repair the LFI:\n  ./fwhelper <lfi_raw.bin> lfi_repair 0x%x 0x%x 0x%x <lfi_out.bin>\n", fw_size, npages, psize);
+	printf("The raw LFI dump should contain two copies of the firmware, both may be corrupted in different places, use these commands to check and repair the LFI:\n  ./fwhelper <lfi_raw.bin> check_lfi 0x%x\n  ./fwhelper <lfi_raw.bin> lfi_repair 0x%x 0x%x 0x%x <lfi_out.bin>\n", fw_size, fw_size, npages, psize);
 }
 
 static uint64_t str_to_size(const char *str) {
