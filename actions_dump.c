@@ -226,6 +226,12 @@ static void usbio_free(usbio_t* io) {
 	((uint8_t*)(p))[1] = (uint8_t)(a); \
 } while (0)
 
+#define WRITE16_LE(p, a) do { \
+  uint32_t __tmp = a; \
+	((uint8_t*)(p))[0] = (uint8_t)__tmp; \
+	((uint8_t*)(p))[1] = (uint8_t)(__tmp >> 8); \
+} while (0)
+
 #define WRITE32_LE(p, a) do { \
   uint32_t __tmp = a; \
 	((uint8_t*)(p))[0] = (uint8_t)__tmp; \
@@ -745,11 +751,31 @@ static void nandread_init(usbio_t *io, nandread_t *x, const char *nandread_fn,
 	}
 
 	psize = READ16_LE(mem + 0xe); // pow2, 0x200..0x4000
+	DBG_LOG("brec page size = 0x%x\n", psize);
 	if ((psize & (psize - 1)) || (psize & ~0x7e00))
-		ERR_EXIT("unexpected page size (0x%x)\n", psize);
+		ERR_EXIT("unexpected brec page size\n");
 	x->psize = psize;
 	if (READ16_LE(mem + 0xc) == 0)
 		ERR_EXIT("invalid nand config\n");
+}
+
+static void nandread_psize(usbio_t *io, nandread_t *x, unsigned psize) {
+	uint8_t buf[12];
+	uint32_t nand_conf = x->nand_args + 0x14;
+	if (x->psize == psize) return;
+	x->psize = psize;
+	read_mem_buf(io, nand_conf, 12, buf, 12);
+	buf[0] = psize >> 9;
+	WRITE16_LE(buf + 10, psize);
+	write_mem_buf(io, nand_conf, 12, buf, 12);
+}
+
+static void nandread_readmsk(usbio_t *io, nandread_t *x, unsigned n) {
+	uint8_t buf[4];
+	if (adfu_chip == 2157 && x->mem[9] >= 0x18) n >>= 1;
+	n = (2u << (n - 1)) - 1;
+	WRITE32_LE(buf, n);
+	write_mem_buf(io, x->nand_args + 8, 4, buf, 4);
 }
 
 static void nandread_read(usbio_t *io, nandread_t *x, uint32_t rowaddr, uint8_t *mem, uint32_t size) {
@@ -840,15 +866,24 @@ static uint32_t dump_brec(usbio_t *io, nandread_t *x,
 }
 
 static void dump_nand(usbio_t *io, nandread_t *x,
-		const char *fn, unsigned start, unsigned len, int print_tags) {
+		const char *fn, unsigned start, unsigned len,
+		unsigned psize, int print_tags) {
 	uint8_t *mem = x->mem;
-	unsigned i, psize = x->psize;
+	unsigned i;
 	FILE *fo = NULL;
 
-	if (fo) {
+	if (fn) {
 		fo = fopen(fn, "wb");
 		if (!fo) ERR_EXIT("fopen(wb) failed\n");
 	} else if (!print_tags) return;
+
+	if (!psize) psize = x->psize;
+	else if (x->psize != psize) {
+		if ((psize & (psize - 1)) || (psize & ~0x7e00))
+			ERR_EXIT("unexpected page size\n");
+		nandread_psize(io, x, psize);
+		nandread_readmsk(io, x, psize >> 9);
+	}
 
 	for (i = 0; i < len; i++) {
 		nandread_read(io, x, start + i, fo ? mem : NULL, psize);
@@ -867,12 +902,18 @@ static void dump_nand(usbio_t *io, nandread_t *x,
 static void find_lfi(usbio_t *io, nandread_t *x, int brec_idx, const char *dump_fn) {
 	uint8_t *mem = x->mem;
 	FILE *fo;
-	unsigned i, j, k, err = 0, psize = x->psize;
+	unsigned i, j, k, err = 0, psize;
 	unsigned fw_size, npages, npages2, nblock;
 	uint32_t tab[256];
 
 	fw_size = dump_brec(io, x, brec_idx, NULL);
 	if (!fw_size) ERR_EXIT("firmware size is unknown\n");
+
+	psize = mem[0x400 + 0x89] << 9;
+	DBG_LOG("lfi page size = 0x%x\n", psize);
+	if ((psize & (psize - 1)) || (psize & ~0x7e00))
+		ERR_EXIT("unexpected lfi page size\n");
+	nandread_psize(io, x, psize);
 
 	npages = READ16_LE(mem + 0xc);
 	npages2 = npages == 0xc0 ? 0x100 : npages;
@@ -882,13 +923,10 @@ static void find_lfi(usbio_t *io, nandread_t *x, int brec_idx, const char *dump_
 
 	// for a faster scan
 	{
-		uint8_t buf[4];
 		uint32_t n = 1;
 		if (mem[9] <= 0xc) n <<= 1;
-		if (adfu_chip != 2157 && mem[9] >= 0x18) n <<= 1;
-		n = (1 << n) - 1;
-		WRITE32_LE(buf, n);
-		write_mem_buf(io, x->nand_args + 8, 4, buf, 4);
+		if (mem[9] >= 0x18) n <<= 1;
+		nandread_readmsk(io, x, n);
 	}
 
 	for (i = 0; i < nblock; i++) {
@@ -920,14 +958,7 @@ static void find_lfi(usbio_t *io, nandread_t *x, int brec_idx, const char *dump_
 	if (!dump_fn) return;
 
 	// restore old value
-	{
-		uint8_t buf[4];
-		uint32_t n = mem[5];
-		if (adfu_chip == 2157 && mem[9] >= 0x18) n >>= 1;
-		n = (2u << (n - 1)) - 1;
-		WRITE32_LE(buf, n);
-		write_mem_buf(io, x->nand_args + 8, 4, buf, 4);
-	}
+	nandread_readmsk(io, x, psize >> 9);
 
 	fo = fopen(dump_fn, "wb");
 	if (!fo) ERR_EXIT("fopen(wb) failed\n");
@@ -983,7 +1014,7 @@ int main(int argc, char **argv) {
 	int verbose = 0;
 	// flashdisk = 10d6:1101, ADFU mode = 10d6:10d6
 	int id_vendor = 0x10d6, id_product = 0x10d6;
-	int blk_size = 0x200;
+	int blk_size = 0x200, nand_psize = 0;
 
 #if USE_LIBUSB
 	ret = libusb_init(NULL);
@@ -1265,7 +1296,7 @@ int main(int argc, char **argv) {
 			len = strtol(argv[4], NULL, 0);
 
 			nandread_init(io, &x, argv[2], NULL, blk_size);
-			dump_nand(io, &x, fn_helper(argv[5]), start, len, 1);
+			dump_nand(io, &x, fn_helper(argv[5]), start, len, nand_psize, 1);
 			nandread_end(io, &x);
 			argc -= 5; argv += 5;
 
@@ -1323,6 +1354,11 @@ int main(int argc, char **argv) {
 			blk_size = str_to_size(argv[2]);
 			blk_size = blk_size < 0 ? 1 :
 					blk_size > 0x4000 ? 0x4000 : blk_size;
+			argc -= 2; argv += 2;
+
+		} else if (!strcmp(argv[1], "nand_psize")) {
+			if (argc <= 2) ERR_EXIT("bad command\n");
+			nand_psize = str_to_size(argv[2]);
 			argc -= 2; argv += 2;
 
 		} else if (!strcmp(argv[1], "timeout")) {

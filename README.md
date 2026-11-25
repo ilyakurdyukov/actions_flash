@@ -73,6 +73,7 @@ The commands below require loading the `adfus` binary that comes with the tool (
 `read_lfi <addr> <size> <output_file>` - read the firmware (requires correct `fwscfNNN.bin`).  
 `write_flash <sector> <file_offset> <size> <input_file>` - write flash (requires correct `fwscfNNN.bin`).  
 `read_brec <payload/readnand.bin> <mbrec_dump.bin> <brec_idx> <brec_dump.bin>` - read boot record (`brec_idx` is 0 or 1).  
+`nand_psize <size>` - set the page size for the `read_nand` command (default is `brec` page size).
 `read_nand <payload/readnand.bin> <rowaddr> <count> <output_file>` - read raw pages from nand flash.  
 `find_lfi <payload/readnand.bin> <brec_idx> <lfi_dump.bin>` - tries to find and dump the LFI chain.  
 
